@@ -1,0 +1,171 @@
+Reverse engineering the GEA Bus
+
+Electrical characteristics:
+
+Logic level:		5V
+Baud rate:		19200 (or 230400 on full-duplex)
+Duplex:			Half (sometimes full)
+Logic orientation:	Inverted
+
+Packet structure:
+
+|----------------------Header--------------------||-Data-||--Checksum--||--Footer---|
+[start byte][destination][length][source][command][data..][crc16][crc16][end byte(s)]
+
+Querying/modifying ERDs:
+
+[start byte][destination][length][source][F0 - read/F1 - write][ERD][ERD][data..][crc16][crc16][end byte(s)]
+
+Native mode commands:
+
+0xC0	Enter native mode
+0xC1	Exit native mode
+
+List of known ERDs:
+
+
+0x1003	over temperature alarm
+0x1004	displayed temperature
+0x1005	set point temperature
+
+ERD commands:
+
+0xF0	Read
+0xF1	Write
+0xF2	Subscribe
+0xF3	Subscribe-list
+0xF4	Unsubscribe
+0xF5	Publish/publish ack
+
+General commands:
+
+Software info:
+CMD:	Desc:			Response data:
+0x01	Software version	[major/AA][major/BB][minor/CC][minor/DD]
+0x04	Get LED brightness (data len: 0c)
+	[0] [FFbrt] (0x00-0x64)
+	[1] [FZbrt] (0x00-0x64)
+	[2] [Rcsbrt] (0x00-0x64)
+	[3] [FFFZMinDuty] (0x00-0x64)
+	[4] [FFFZDSMLowMed] (0x00-0x64)
+	[5] [FFFZDSMHigh] (0x00-0x64)
+	[6] [FFFZDSMCrit] (0x00-0x64)
+	[7] [FFFZRampUpTime] (0x00-0x64)
+	[8] [FFFZRampDownTime] (0x00-0x64)
+	[9] [MinRcsDuty] (0x00-0x64)
+	[10] [RcsDSMLowMed] (0x00-0x64)
+	[11] [RCSDSMHigh] (0x00-0x64)
+	[12] [RcsDSMCrit] (0x00-0x64)
+0x05	Set LED brightness (data len: 02)
+	[0] FZ (0x00-0x64)
+	[1] FF (0x00-0x64)
+	[2] Rcs (0x00-0x64)
+0x06	Set door alarm status (data len: 01)
+	[0] (0x41=on, 0x51=off)
+0x13	Get dispense flow meter feedback (data len: 02) 
+	[0] (0x00=active 0x01=not active)
+	[1] [PulseCount0]
+	[2] [PulseCount1]
+
+Diagnostics:
+0x64	Get fault code history (data len: a5)) 
+	[0]	Req modifier/idx
+	[1-2]	Fcode0
+	[3-4]	Fcode1
+	[5-6]	Fcode2
+	[7-8]	Fcode3
+	[9-10]	Fcode4
+	[11-12]	Fcode5
+	[13-14]	Fcode6
+	[15-16]	Fcode7
+	[17-18]	Fcode8
+	[19-20]	Fcode9
+0x67	Clear all fault codes
+	No data sent
+0x87	Reset door count
+	No data sent
+0x8C	Reset dispense counters
+	No data sent
+0x8E	Get cabinet temperatures:
+	[0-1]	FF avg temp (MSB, LSB)
+	[2-3]	FZ avg temp (MSB, LSB)
+	[4-5]	Deli pan avg temp (MSB, LSB)
+0x8F	Get filter times
+	[0-1]	Wtr calendar timer (1 count=30 min) (MSB, LSB)
+	[2]	Wtr percent used
+	[3-4]	Wtr time remaining (hr)
+	[5-8]	Usage timer (MSB first)
+	[10-13]	Ounces remaining
+	[14-15]	Odor calendar timer 
+	[16]	Odor percent used 
+	[17-18]	Odor time remaining
+0x90	Reset water/freshness filter
+	No data sent
+0x91	Valve open times (MSB first)
+	[0] modifier
+	[1-4]	Cold VOT
+	[5-8]	Hot VOT
+	[9-12]	M/B I/M VOT
+	[13-16] D/B I/M VOT
+	[17-18] Wtr calendar timer (if modifier=1)
+	[19-20] Odr calendar timer (if modifier=1)
+0x93	Reset count and operation time (MSB, LSB)
+	[0-1]	Reset ctr 
+	[2-3]	Days in the field
+	[4]	Hours in the field
+	[5]	Minutes in the field
+	[6]	Seconds in the field
+Query command: [e2 00 09 BF cmd crc16 crc16 e3 e1]
+Query response: [e2 bf len 00 cmd data... crc16 crc16 e3 e1]
+
+
+Exceptions:
+Main board response:	[AA][BB][CC][DD][personality][S/W type][DDRMJ][DDRMJ][DDRMN][DDRMN][H/W ver][H/W bd ver][H/W bd ver][GrFmt ver][GrFmt ver][GrFmt ver]
+
+==================================REFRIGERATORS:===================================
+
+Addressing on bottom-freezer refrigerators:
+0x00	Main board
+0x01	RFID water filter reader
+0x02	Dispenser board
+0x03	Door board
+0xBF	WiFi module
+0xCB	Reserved for Green/Gray/Blue Bean devices
+0xF0	GEA_I<->GEA_E mailbox
+0xFF	Broadcast (same for all appliances)
+
+Example packets:
+
+Put into native mode:			E2 00 08 CB C0 10 12 E3
+Exit out of native mode and reset:	E2 00 08 CB C1 00 33 E3
+
+Read cabin temperatures:		E2 00 08 CB 8E B9 18 E3
+Dump last 10 error codes:		E2 00 08 CB 64 E5 7C E3
+Dump operation statistics:		E2 00 08 CB 93 7A 84 E3
+Clear all fault codes:			E2 00 08 CB 67 D5 1F E3
+Get s/w version of main board:		E2 00 08 CB 01 D9 7F E3
+	01 01 04.47.35.00 02 0002 000500 3504
+Get s/w version of ACM board:		E2 02 08 CB 01 34 17 E3
+Get s/w version of door board:		E2 03 08 CB 01 42 A3 E3
+Get s/w version of WiFi module:		E2 BF 08 CB 01 FC 40 E3
+Get LED brightness:			E2 00 08 CB 04 89 DA E3
+Get door open counts:			E2 00 08 CB 24 AD B8 E3
+Get general control state:		E2 00 08 CB 31 EF 2C E3
+Get relay, fan, and damper status:	E2 00 08 CB 33 CF 6E E3
+Get thermistor summary data 1:		E2 00 08 CB 34 BF 89 E3
+Get thermistor summary data 2:		E2 00 08 CB 35 AF A8 E3
+Get door board info:			E2 00 08 CB 36 9F CB E3
+
+Turn compressor on:			E2 00 09 CB 74 51 EE 98 E3
+Turn compressor off:			E2 00 09 CB 74 50 FE B9 E3
+
+==============================RANGES:=============================================
+
+Addressing on ranges:
+0x80	Main board
+0xbf	WiFi module
+
+Example packets:
+
+Put into native mode:			E2 80 09 CB A0 01 4F 5E E3
+Exit out of native mode and reset:	E2 80 09 CB A0 00 5F 7F E3
